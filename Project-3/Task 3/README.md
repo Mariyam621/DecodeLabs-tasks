@@ -37,7 +37,7 @@ An interactive, high-fidelity real-time dashboard simulating a futuristic space 
 ```text
 Project 3/
 ├── images/
-│   └── ScreenShot.PNG      <-- High-resolution dashboard operational snapshot
+│   └── Screenshot.PNG      <-- High-resolution dashboard operational snapshot
 ├── index.html              <-- Main application layout & reactive script engine
 └── (No external dependencies — compiled cleanly inside standard single file)
 ```
