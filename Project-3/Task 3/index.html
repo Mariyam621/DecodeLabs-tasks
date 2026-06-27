@@ -1,0 +1,1030 @@
+ <!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Project 3 - ATLAS Mission Control</title>
+
+  <!-- JetBrains Mono for data readouts, DM Sans for UI labels -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+
+  <style>
+    /* ─────────────────────────────────────────
+       DESIGN TOKENS — space/control-room palette
+    ───────────────────────────────────────── */
+    :root {
+      --space-deep:   #050d1a;   /* page background — near-black navy */
+      --space-panel:  #0a1628;   /* card / panel surface */
+      --space-rim:    #112240;   /* borders and panel rims */
+      --space-mid:    #1a3a5c;   /* hover states, subtle fill */
+      --cyan:         #00d4ff;   /* primary accent — radar-screen blue */
+      --orange:       #ff6b35;   /* alert / active accent */
+      --green:        #00e676;   /* ACTIVE mission status */
+      --yellow:       #ffd740;   /* PENDING status */
+      --red:          #ff4444;   /* FAILED / ABORT */
+      --text:         #ccd6f6;   /* main text — slightly blue-tinted */
+      --text-dim:     #5a7a9e;   /* muted labels */
+      --mono:         'JetBrains Mono', monospace;
+      --sans:         'DM Sans', sans-serif;
+      --radius:       6px;
+    }
+
+    /* ─────────────────────────────────────────
+       RESET
+    ───────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: var(--sans);
+      background: var(--space-deep);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    /* ─────────────────────────────────────────
+       SCANLINE OVERLAY — the signature element.
+       A very faint CSS repeating-linear-gradient
+       gives the whole page a subtle CRT monitor
+       texture without any images or JS.
+    ───────────────────────────────────────── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0, 212, 255, 0.015) 2px,
+        rgba(0, 212, 255, 0.015) 4px
+      );
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ─────────────────────────────────────────
+       TOP BAR
+    ───────────────────────────────────────── */
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      background: var(--space-panel);
+      border-bottom: 1px solid var(--space-rim);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 2rem;
+      height: 56px;
+    }
+
+    .topbar__brand {
+      font-family: var(--mono);
+      font-size: 0.9rem;
+      font-weight: 700;
+      letter-spacing: 0.18em;
+      color: var(--cyan);
+      text-transform: uppercase;
+    }
+
+    .topbar__brand span {
+      color: var(--text-dim);
+      font-weight: 400;
+    }
+
+    /* Live mission clock — JS ticks this every second */
+    .topbar__clock {
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      color: var(--text-dim);
+      letter-spacing: 0.1em;
+    }
+
+    .topbar__clock .clock-value {
+      color: var(--cyan);
+      font-weight: 600;
+    }
+
+    /* Blinking dot — pure CSS, signals "live" system */
+    .live-dot {
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--green);
+      margin-right: 6px;
+      animation: blink 1.4s ease-in-out infinite;
+      vertical-align: middle;
+    }
+
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.2; }
+    }
+
+    /* ─────────────────────────────────────────
+       MAIN LAYOUT
+    ───────────────────────────────────────── */
+    .page {
+      position: relative;
+      z-index: 1;
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem 4rem;
+    }
+
+    /* ─────────────────────────────────────────
+       HERO / HEADER AREA
+    ───────────────────────────────────────── */
+    .hero {
+      margin-bottom: 2.5rem;
+    }
+
+    .hero__eyebrow {
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      letter-spacing: 0.2em;
+      color: var(--cyan);
+      text-transform: uppercase;
+      margin-bottom: 0.6rem;
+    }
+
+    .hero__title {
+      font-family: var(--mono);
+      font-size: clamp(1.6rem, 4vw, 2.4rem);
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: -0.02em;
+      line-height: 1.2;
+      margin-bottom: 0.6rem;
+    }
+
+    .hero__title .accent { color: var(--cyan); }
+
+    .hero__sub {
+      font-size: 0.9rem;
+      color: var(--text-dim);
+      max-width: 520px;
+      line-height: 1.65;
+    }
+
+    /* ─────────────────────────────────────────
+       STAT STRIP — live counts, updates with JS
+    ───────────────────────────────────────── */
+    .stat-strip {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 1px;         /* gap of 1px acts as divider lines */
+      background: var(--space-rim);
+      border: 1px solid var(--space-rim);
+      border-radius: var(--radius);
+      overflow: hidden;
+      margin-bottom: 2rem;
+    }
+
+    .stat {
+      background: var(--space-panel);
+      padding: 1rem 1.2rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.3rem;
+    }
+
+    .stat__label {
+      font-family: var(--mono);
+      font-size: 0.62rem;
+      letter-spacing: 0.15em;
+      color: var(--text-dim);
+      text-transform: uppercase;
+    }
+
+    .stat__value {
+      font-family: var(--mono);
+      font-size: 1.8rem;
+      font-weight: 700;
+      line-height: 1;
+      color: var(--cyan);
+      /* smooth number update */
+      transition: color 0.2s ease;
+    }
+
+    /* Colour overrides for different stat meanings */
+    .stat__value--active  { color: var(--green);  }
+    .stat__value--pending { color: var(--yellow); }
+    .stat__value--failed  { color: var(--red);    }
+
+    /* ─────────────────────────────────────────
+       CONTROLS ROW — filter tabs + add button
+    ───────────────────────────────────────── */
+    .controls {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+      flex-wrap: wrap;
+    }
+
+    /* Filter tabs */
+    .filter-tabs {
+      display: flex;
+      gap: 2px;
+      background: var(--space-panel);
+      border: 1px solid var(--space-rim);
+      border-radius: var(--radius);
+      padding: 3px;
+    }
+
+    .filter-tab {
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 0.45rem 0.9rem;
+      border: none;
+      background: none;
+      color: var(--text-dim);
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+
+    /* JS adds .is-active to the selected tab */
+    .filter-tab.is-active {
+      background: var(--space-mid);
+      color: var(--cyan);
+    }
+
+    .filter-tab:hover:not(.is-active) {
+      color: var(--text);
+    }
+
+    /* Add mission button */
+    .btn-add {
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      padding: 0.55rem 1.2rem;
+      background: var(--cyan);
+      color: var(--space-deep);
+      border: none;
+      border-radius: var(--radius);
+      font-weight: 700;
+      cursor: pointer;
+      transition: opacity 0.15s ease, transform 0.1s ease;
+    }
+
+    .btn-add:hover  { opacity: 0.85; }
+    .btn-add:active { transform: scale(0.97); }
+
+    /* ─────────────────────────────────────────
+       ADD MISSION FORM — hidden by default,
+       JS toggles .is-open to show/hide it
+    ───────────────────────────────────────── */
+    .add-form-wrapper {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.35s ease;
+    }
+
+    .add-form-wrapper.is-open {
+      max-height: 300px; /* large enough to not clip content */
+    }
+
+    .add-form {
+      background: var(--space-panel);
+      border: 1px solid var(--space-rim);
+      border-radius: var(--radius);
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+      display: grid;
+      grid-template-columns: 1fr 1fr auto;
+      gap: 0.75rem;
+      align-items: end;
+    }
+
+    .form-field {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+    }
+
+    .form-label {
+      font-family: var(--mono);
+      font-size: 0.65rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+    }
+
+    .form-input,
+    .form-select {
+      font-family: var(--mono);
+      font-size: 0.85rem;
+      background: var(--space-deep);
+      border: 1px solid var(--space-rim);
+      border-radius: 4px;
+      color: var(--text);
+      padding: 0.55rem 0.8rem;
+      outline: none;
+      transition: border-color 0.15s ease;
+    }
+
+    .form-input:focus,
+    .form-select:focus {
+      border-color: var(--cyan);
+    }
+
+    /* The select arrow colour needs a workaround in dark bg */
+    .form-select option {
+      background: var(--space-panel);
+    }
+
+    .btn-launch {
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      font-weight: 700;
+      padding: 0.6rem 1rem;
+      background: var(--orange);
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: opacity 0.15s ease;
+      align-self: flex-end;
+    }
+
+    .btn-launch:hover { opacity: 0.85; }
+
+    /* ─────────────────────────────────────────
+       MISSION LIST
+    ───────────────────────────────────────── */
+    .mission-list {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;       /* hairline separators between rows */
+      background: var(--space-rim);
+      border: 1px solid var(--space-rim);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+
+    /* "No missions" empty state */
+    .empty-state {
+      background: var(--space-panel);
+      padding: 3rem 2rem;
+      text-align: center;
+      font-family: var(--mono);
+      font-size: 0.85rem;
+      color: var(--text-dim);
+      letter-spacing: 0.05em;
+      display: none; /* shown by JS when list is empty */
+    }
+
+    /* Individual mission row */
+    .mission-row {
+      background: var(--space-panel);
+      display: grid;
+      /* name | type | status toggle | abort button */
+      grid-template-columns: 1fr auto auto auto;
+      align-items: center;
+      gap: 1rem;
+      padding: 0.9rem 1.2rem;
+      transition: background 0.15s ease;
+      animation: rowIn 0.25s ease both;
+    }
+
+    @keyframes rowIn {
+      from { opacity: 0; transform: translateX(-8px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+
+    .mission-row:hover {
+      background: var(--space-mid);
+    }
+
+    /* Missions being removed fade out first */
+    .mission-row.is-removing {
+      animation: rowOut 0.25s ease forwards;
+    }
+
+    @keyframes rowOut {
+      to { opacity: 0; transform: translateX(8px); max-height: 0; padding: 0; }
+    }
+
+    .mission-name {
+      font-family: var(--mono);
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: var(--text);
+      letter-spacing: 0.03em;
+    }
+
+    /* Strikethrough when a mission is marked COMPLETE */
+    .mission-row.is-complete .mission-name {
+      text-decoration: line-through;
+      color: var(--text-dim);
+    }
+
+    .mission-type {
+      font-family: var(--mono);
+      font-size: 0.65rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      border: 1px solid var(--space-rim);
+      border-radius: 3px;
+      padding: 2px 7px;
+      white-space: nowrap;
+    }
+
+    /* Status badge — colour changes with JS-toggled class */
+    .mission-status {
+      font-family: var(--mono);
+      font-size: 0.65rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      padding: 4px 10px;
+      border-radius: 3px;
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: background 0.2s ease, color 0.2s ease;
+      white-space: nowrap;
+    }
+
+    .mission-status[data-status="ACTIVE"] {
+      background: rgba(0, 230, 118, 0.12);
+      color: var(--green);
+      border-color: rgba(0, 230, 118, 0.3);
+    }
+
+    .mission-status[data-status="PENDING"] {
+      background: rgba(255, 215, 64, 0.12);
+      color: var(--yellow);
+      border-color: rgba(255, 215, 64, 0.3);
+    }
+
+    .mission-status[data-status="COMPLETE"] {
+      background: rgba(90, 122, 158, 0.15);
+      color: var(--text-dim);
+      border-color: var(--space-rim);
+    }
+
+    /* Abort / remove button */
+    .btn-abort {
+      background: none;
+      border: 1px solid transparent;
+      color: var(--text-dim);
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      padding: 4px 8px;
+      border-radius: 3px;
+      cursor: pointer;
+      transition: color 0.15s ease, border-color 0.15s ease;
+    }
+
+    .btn-abort:hover {
+      color: var(--red);
+      border-color: rgba(255, 68, 68, 0.4);
+    }
+
+    /* ─────────────────────────────────────────
+       BOTTOM: MISSION LOG
+       Dynamic textarea that JS appends log lines to
+    ───────────────────────────────────────── */
+    .log-section {
+      margin-top: 2.5rem;
+    }
+
+    .log-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 0.75rem;
+    }
+
+    .log-title {
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+    }
+
+    .btn-clear-log {
+      font-family: var(--mono);
+      font-size: 0.65rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      background: none;
+      border: 1px solid var(--space-rim);
+      color: var(--text-dim);
+      padding: 3px 8px;
+      border-radius: 3px;
+      cursor: pointer;
+      transition: color 0.15s ease;
+    }
+
+    .btn-clear-log:hover { color: var(--text); }
+
+    .log-box {
+      background: var(--space-deep);
+      border: 1px solid var(--space-rim);
+      border-radius: var(--radius);
+      padding: 1rem 1.2rem;
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      line-height: 1.8;
+      min-height: 130px;
+      max-height: 200px;
+      overflow-y: auto;
+      /* latest entry at the bottom */
+    }
+
+    /* Coloured log line prefixes */
+    .log-line { display: block; }
+    .log-line--add      { color: var(--cyan);   }
+    .log-line--status   { color: var(--yellow); }
+    .log-line--abort    { color: var(--red);    }
+    .log-line--system   { color: var(--text-dim); }
+
+    /* ─────────────────────────────────────────
+       RESPONSIVE
+    ───────────────────────────────────────── */
+    @media (max-width: 680px) {
+      .add-form {
+        grid-template-columns: 1fr;
+      }
+      .mission-row {
+        grid-template-columns: 1fr auto;
+        grid-template-rows: auto auto;
+      }
+      .mission-type  { grid-column: 2; grid-row: 1; }
+      .mission-status { grid-column: 1; grid-row: 2; justify-self: start; }
+      .btn-abort      { grid-column: 2; grid-row: 2; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation: none !important; transition: none !important; }
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- ═══════════════════════════════════════
+       TOP BAR
+  ═══════════════════════════════════════ -->
+  <header class="topbar">
+    <div class="topbar__brand">
+      ATLAS<span> / Mission Control</span>
+    </div>
+    <!-- JS writes the time into .clock-value every second -->
+    <div class="topbar__clock">
+      <span class="live-dot"></span>
+      SYS TIME&nbsp;&nbsp;<span class="clock-value js-clock">——:——:——</span>
+    </div>
+  </header>
+
+
+  <!-- ═══════════════════════════════════════
+       MAIN CONTENT
+  ═══════════════════════════════════════ -->
+  <main class="page">
+
+    <!-- Hero -->
+    <div class="hero">
+      <p class="hero__eyebrow">// DecodeLabs · Project 3 · Interactive Web Elements</p>
+      <h1 class="hero__title">
+        Space <span class="accent">Mission</span> Tracker
+      </h1>
+      <p class="hero__sub">
+        Add missions, cycle their status, filter by type, and watch the stats update live. Every action is logged below in real time.
+      </p>
+    </div>
+
+
+    <!-- Stat Strip — all values are written by JS -->
+    <div class="stat-strip">
+      <div class="stat">
+        <span class="stat__label">Total</span>
+        <span class="stat__value js-stat-total">0</span>
+      </div>
+      <div class="stat">
+        <span class="stat__label">Active</span>
+        <span class="stat__value stat__value--active js-stat-active">0</span>
+      </div>
+      <div class="stat">
+        <span class="stat__label">Pending</span>
+        <span class="stat__value stat__value--pending js-stat-pending">0</span>
+      </div>
+      <div class="stat">
+        <span class="stat__label">Complete</span>
+        <span class="stat__value js-stat-complete">0</span>
+      </div>
+    </div>
+
+
+    <!-- Controls: filter tabs + add button -->
+    <div class="controls">
+      <div class="filter-tabs">
+        <!-- data-filter tells JS which missions to show -->
+        <button class="filter-tab is-active" data-filter="ALL">All</button>
+        <button class="filter-tab" data-filter="ACTIVE">Active</button>
+        <button class="filter-tab" data-filter="PENDING">Pending</button>
+        <button class="filter-tab" data-filter="COMPLETE">Complete</button>
+      </div>
+
+      <!-- Toggles the add-form open/closed -->
+      <button class="btn-add js-toggle-form">+ Add Mission</button>
+    </div>
+
+
+    <!-- Add Mission Form — collapsed by default -->
+    <div class="add-form-wrapper js-form-wrapper">
+      <div class="add-form">
+        <div class="form-field">
+          <label class="form-label" for="mission-name-input">Mission Name</label>
+          <input
+            id="mission-name-input"
+            class="form-input js-name-input"
+            type="text"
+            placeholder="e.g. Artemis VII"
+            maxlength="40"
+            autocomplete="off"
+          />
+        </div>
+
+        <div class="form-field">
+          <label class="form-label" for="mission-type-select">Mission Type</label>
+          <select id="mission-type-select" class="form-select js-type-select">
+            <option value="ORBITAL">Orbital</option>
+            <option value="LUNAR">Lunar</option>
+            <option value="DEEP SPACE">Deep Space</option>
+            <option value="RECON">Recon</option>
+            <option value="SUPPLY">Supply</option>
+          </select>
+        </div>
+
+        <button class="btn-launch js-submit-mission">Launch ↗</button>
+      </div>
+    </div>
+
+
+    <!-- Mission list — rows are injected here by JS -->
+    <div class="mission-list js-mission-list">
+      <p class="empty-state js-empty-state">
+        // No missions on record. Add one above.
+      </p>
+    </div>
+
+
+    <!-- Activity Log -->
+    <div class="log-section">
+      <div class="log-header">
+        <span class="log-title">// Activity Log</span>
+        <button class="btn-clear-log js-clear-log">Clear</button>
+      </div>
+      <div class="log-box js-log-box">
+        <span class="log-line log-line--system">[ATLAS] System online. Awaiting mission data.</span>
+      </div>
+    </div>
+
+  </main>
+
+
+  <!-- ═══════════════════════════════════════
+       JAVASCRIPT
+       Organised by feature. IPO loop is
+       labeled on each section.
+  ═══════════════════════════════════════ -->
+  <script>
+
+    // ─────────────────────────────────────────
+    // APP STATE
+    // One central array stores all missions.
+    // Everything else reads from this array.
+    // ─────────────────────────────────────────
+
+    // Each mission: { id, name, type, status }
+    // Status cycles: PENDING → ACTIVE → COMPLETE → PENDING
+    let missions = [];
+
+    // Track which filter is currently active
+    let currentFilter = 'ALL';
+
+    // Auto-increment ID so each mission has a unique key
+    let nextId = 1;
+
+    // Status cycle order — clicking a badge moves to the next
+    const STATUS_CYCLE = ['PENDING', 'ACTIVE', 'COMPLETE'];
+
+
+    // ─────────────────────────────────────────
+    // FEATURE 1 — LIVE CLOCK
+    // INPUT:  setInterval fires every 1000ms
+    // PROCESS: build a UTC time string
+    // OUTPUT:  write it into .js-clock
+    // ─────────────────────────────────────────
+
+    const clockEl = document.querySelector('.js-clock');
+
+    function tickClock() {
+      const now = new Date();
+      // Zero-pad hours, minutes, seconds
+      const hh = String(now.getUTCHours()).padStart(2, '0');
+      const mm = String(now.getUTCMinutes()).padStart(2, '0');
+      const ss = String(now.getUTCSeconds()).padStart(2, '0');
+      clockEl.textContent = `${hh}:${mm}:${ss} UTC`;
+    }
+
+    tickClock();                      // call immediately so there's no blank flash
+    setInterval(tickClock, 1000);     // then tick every second
+
+
+    // ─────────────────────────────────────────
+    // FEATURE 2 — ADD MISSION FORM TOGGLE
+    // INPUT:  click on "Add Mission" button
+    // PROCESS: toggle .is-open on the wrapper
+    // OUTPUT:  CSS max-height transition reveals/hides form
+    // ─────────────────────────────────────────
+
+    const toggleFormBtn = document.querySelector('.js-toggle-form');
+    const formWrapper   = document.querySelector('.js-form-wrapper');
+    const nameInput     = document.querySelector('.js-name-input');
+
+    toggleFormBtn.addEventListener('click', function () {
+      const isOpen = formWrapper.classList.toggle('is-open');
+
+      // Update button label to reflect current state
+      this.textContent = isOpen ? '✕ Cancel' : '+ Add Mission';
+
+      // Auto-focus the name field when the form opens
+      if (isOpen) nameInput.focus();
+    });
+
+
+    // ─────────────────────────────────────────
+    // FEATURE 3 — ADD A MISSION
+    // INPUT:  click "Launch ↗" button
+    // PROCESS: validate, create mission object, push to array
+    // OUTPUT:  render the updated list + log the event
+    // ─────────────────────────────────────────
+
+    const submitBtn  = document.querySelector('.js-submit-mission');
+    const typeSelect = document.querySelector('.js-type-select');
+
+    submitBtn.addEventListener('click', addMission);
+
+    // Also allow pressing Enter inside the name field
+    nameInput.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') addMission();
+    });
+
+    function addMission() {
+      const name = nameInput.value.trim();
+
+      // Basic validation — name must not be empty
+      if (!name) {
+        nameInput.style.borderColor = '#ff4444';
+        nameInput.focus();
+        // Reset the border after a moment
+        setTimeout(() => { nameInput.style.borderColor = ''; }, 1200);
+        return;
+      }
+
+      // PROCESS: build the mission object
+      const mission = {
+        id:     nextId++,
+        name:   name,
+        type:   typeSelect.value,
+        status: 'PENDING'     // all missions start as PENDING
+      };
+
+      missions.push(mission);
+
+      // Reset the form inputs
+      nameInput.value = '';
+
+      // Close the form panel
+      formWrapper.classList.remove('is-open');
+      toggleFormBtn.textContent = '+ Add Mission';
+
+      // OUTPUT
+      renderMissions();
+      updateStats();
+      appendLog(`Mission "${mission.name}" registered — Status: PENDING`, 'add');
+    }
+
+
+    // ─────────────────────────────────────────
+    // FEATURE 4 — FILTER TABS
+    // INPUT:  click a filter tab
+    // PROCESS: update currentFilter, mark tab active
+    // OUTPUT:  re-render the mission list
+    // ─────────────────────────────────────────
+
+    const filterTabs = document.querySelectorAll('.filter-tab');
+
+    filterTabs.forEach(tab => {
+      tab.addEventListener('click', function () {
+        // Remove active from all tabs
+        filterTabs.forEach(t => t.classList.remove('is-active'));
+        // Add active to the clicked one
+        this.classList.add('is-active');
+
+        // Update the filter state and re-render
+        currentFilter = this.dataset.filter;
+        renderMissions();
+      });
+    });
+
+
+    // ─────────────────────────────────────────
+    // FEATURE 5 — RENDER MISSIONS
+    // This is the main OUTPUT function.
+    // It reads from the `missions` array and
+    // the `currentFilter`, then builds the DOM.
+    // ─────────────────────────────────────────
+
+    const missionList  = document.querySelector('.js-mission-list');
+    const emptyState   = document.querySelector('.js-empty-state');
+
+    function renderMissions() {
+      // Decide which missions to show based on active filter
+      const visible = currentFilter === 'ALL'
+        ? missions
+        : missions.filter(m => m.status === currentFilter);
+
+      // Clear existing rows (leave the empty-state element in place)
+      missionList.querySelectorAll('.mission-row').forEach(el => el.remove());
+
+      if (visible.length === 0) {
+        emptyState.style.display = 'block';
+        return;
+      }
+
+      emptyState.style.display = 'none';
+
+      // Build and append a row for each visible mission
+      visible.forEach(mission => {
+        const row = document.createElement('div');
+        row.className = 'mission-row' + (mission.status === 'COMPLETE' ? ' is-complete' : '');
+        // Store the mission ID on the element so event handlers can find it
+        row.dataset.id = mission.id;
+
+        row.innerHTML = `
+          <span class="mission-name">${escapeHtml(mission.name)}</span>
+          <span class="mission-type">${mission.type}</span>
+          <button class="mission-status js-cycle-status" data-status="${mission.status}">
+            ${mission.status}
+          </button>
+          <button class="btn-abort js-abort">ABORT</button>
+        `;
+
+        missionList.appendChild(row);
+      });
+    }
+
+    // Cycle a mission's status when its badge is clicked
+    // Uses event delegation on the list — one listener handles all rows
+    missionList.addEventListener('click', function (e) {
+
+      // ── CYCLE STATUS ──────────────────────
+      if (e.target.matches('.js-cycle-status')) {
+        const row       = e.target.closest('.mission-row');
+        const id        = parseInt(row.dataset.id, 10);
+        const mission   = missions.find(m => m.id === id);
+        if (!mission) return;
+
+        // PROCESS: find the next status in the cycle
+        const currentIndex = STATUS_CYCLE.indexOf(mission.status);
+        mission.status     = STATUS_CYCLE[(currentIndex + 1) % STATUS_CYCLE.length];
+
+        // OUTPUT
+        renderMissions();
+        updateStats();
+        appendLog(`"${mission.name}" status → ${mission.status}`, 'status');
+      }
+
+      // ── ABORT MISSION ────────────────────
+      if (e.target.matches('.js-abort')) {
+        const row  = e.target.closest('.mission-row');
+        const id   = parseInt(row.dataset.id, 10);
+        const mission = missions.find(m => m.id === id);
+        if (!mission) return;
+
+        // Play slide-out animation before removing from the array
+        row.classList.add('is-removing');
+
+        setTimeout(() => {
+          // PROCESS: remove mission from state array
+          missions = missions.filter(m => m.id !== id);
+          // OUTPUT: re-render and update stats
+          renderMissions();
+          updateStats();
+          appendLog(`Mission "${mission.name}" aborted and removed.`, 'abort');
+        }, 250); // match animation duration
+      }
+    });
+
+
+    // ─────────────────────────────────────────
+    // FEATURE 6 — LIVE STATS
+    // Reads the missions array and writes counts
+    // into the stat strip elements.
+    // ─────────────────────────────────────────
+
+    const statTotal    = document.querySelector('.js-stat-total');
+    const statActive   = document.querySelector('.js-stat-active');
+    const statPending  = document.querySelector('.js-stat-pending');
+    const statComplete = document.querySelector('.js-stat-complete');
+
+    function updateStats() {
+      statTotal.textContent    = missions.length;
+      statActive.textContent   = missions.filter(m => m.status === 'ACTIVE').length;
+      statPending.textContent  = missions.filter(m => m.status === 'PENDING').length;
+      statComplete.textContent = missions.filter(m => m.status === 'COMPLETE').length;
+    }
+
+
+    // ─────────────────────────────────────────
+    // FEATURE 7 — ACTIVITY LOG
+    // Appends a timestamped line to the log box
+    // each time a significant event happens.
+    // ─────────────────────────────────────────
+
+    const logBox = document.querySelector('.js-log-box');
+
+    /**
+     * Appends a log entry with a UTC timestamp.
+     * @param {string} message - the log text
+     * @param {'add'|'status'|'abort'|'system'} type - controls colour
+     */
+    function appendLog(message, type) {
+      const now = new Date();
+      const ts  = `${String(now.getUTCHours()).padStart(2,'0')}:${String(now.getUTCMinutes()).padStart(2,'0')}:${String(now.getUTCSeconds()).padStart(2,'0')}`;
+
+      // Build the log line element
+      const line = document.createElement('span');
+      line.className = `log-line log-line--${type}`;
+      // textContent is safe — no XSS risk
+      line.textContent = `[${ts}] ${message}`;
+
+      logBox.appendChild(line);
+
+      // Auto-scroll to the latest entry
+      logBox.scrollTop = logBox.scrollHeight;
+    }
+
+    // Clear log button
+    document.querySelector('.js-clear-log').addEventListener('click', function () {
+      logBox.innerHTML = '';
+      appendLog('Log cleared.', 'system');
+    });
+
+
+    // ─────────────────────────────────────────
+    // UTILITY — HTML escape
+    // Prevents XSS when inserting user text into innerHTML.
+    // (The mission name could contain < > " & etc.)
+    // ─────────────────────────────────────────
+    function escapeHtml(str) {
+      return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+
+    // ─────────────────────────────────────────
+    // SEED DATA — a few starter missions so the
+    // page doesn't open completely empty
+    // ─────────────────────────────────────────
+    const seedMissions = [
+      { name: 'Helios-9',    type: 'ORBITAL',    status: 'ACTIVE'   },
+      { name: 'Persephone',  type: 'DEEP SPACE', status: 'PENDING'  },
+      { name: 'Cygnus Relay',type: 'SUPPLY',     status: 'COMPLETE' },
+    ];
+
+    seedMissions.forEach(s => {
+      missions.push({ id: nextId++, name: s.name, type: s.type, status: s.status });
+    });
+
+    renderMissions();
+    updateStats();
+
+  </script>
+</body>
+</html>
